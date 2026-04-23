@@ -6,6 +6,15 @@ const axios = require('axios');
 const app = express();
 app.use(express.json());
 
+// CORS
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Api-Key');
+  if (req.method === 'OPTIONS') return res.sendStatus(200);
+  next();
+});
+
 // ===================== CONFIGURAÇÕES =====================
 const WAHA_URL = 'https://waha-production-8b6c.up.railway.app';
 const WAHA_KEY = '594d5b24d1d94245a25f5ee35eaec663';
@@ -56,40 +65,40 @@ const HORARIOS = ['', '08h-10h', '10h-12h', '12h-14h', '14h-16h', '16h-18h', '18
 const CARDAPIO_1 = `🍞 *CARDÁPIO DA PADARIA DA MATRIZ* 🍞
 
 *PÃES*
-1️⃣ Pão de Trança — R$ 16,00
-2️⃣ Pão de Milho — R$ 15,00
+1 - Pão de Trança — R$ 16,00
+2 - Pão de Milho — R$ 15,00
 
 *CUCAS FRUTADAS*
-3️⃣ Cuca de Banana P — R$ 18,00
-4️⃣ Cuca de Banana M — R$ 24,00
-5️⃣ Cuca de Abacaxi — R$ 20,00
-6️⃣ Cuca de Goiabada — R$ 20,00
-7️⃣ Cuca de Uva — R$ 20,00
-8️⃣ Cuca de Coco — R$ 24,00
+3 - Cuca de Banana P — R$ 18,00
+4 - Cuca de Banana M — R$ 24,00
+5 - Cuca de Abacaxi — R$ 20,00
+6 - Cuca de Goiabada — R$ 20,00
+7 - Cuca de Uva — R$ 20,00
+8 - Cuca de Coco — R$ 24,00
 
 *PUDINS*
-9️⃣ Pudim P — R$ 18,00
-🔟 Pudim M — R$ 20,00`;
+9 - Pudim P — R$ 18,00
+10 - Pudim M — R$ 20,00`;
 
 const CARDAPIO_2 = `*CUCAS DOCE E FAROFA*
-1️⃣1️⃣ Cuca Farofa M — R$ 20,00
-1️⃣2️⃣ Cuca Farofa G — R$ 35,00
+11 - Cuca Farofa M — R$ 20,00
+12 - Cuca Farofa G — R$ 35,00
 
 *BOLOS*
-1️⃣3️⃣ Bolo Manteiga Simples — R$ 26,00
-1️⃣4️⃣ Bolo Manteiga Enfeitado — R$ 35,00
-1️⃣5️⃣ Bolo Manteiga Recheado — R$ 65,00
+13 - Bolo Manteiga Simples — R$ 26,00
+14 - Bolo Manteiga Enfeitado — R$ 35,00
+15 - Bolo Manteiga Recheado — R$ 65,00
 
 *ROCAMBOLES*
-1️⃣6️⃣ Rocambole de Amendoim — R$ 23,00
-1️⃣7️⃣ Rocambole de Coco — R$ 23,00
-1️⃣8️⃣ Rocambole de Brigadeiro — R$ 23,00
+16 - Rocambole de Amendoim — R$ 23,00
+17 - Rocambole de Coco — R$ 23,00
+18 - Rocambole de Brigadeiro — R$ 23,00
 
 *TORTAS*
-1️⃣9️⃣ Torta de Banana — R$ 35,00
-2️⃣0️⃣ Torta de Ricota — R$ 35,00
+19 - Torta de Banana — R$ 35,00
+20 - Torta de Ricota — R$ 35,00
 
-👉 Digite o *NÚMERO* do produto desejado:`;
+👉 Digite o *número* do produto ou *NÃO* para finalizar:`;
 
 // ===================== REDIS HELPERS =====================
 async function getEstado(chatId) {
@@ -107,6 +116,17 @@ async function setEstado(chatId, estado) {
 async function delEstado(chatId) {
   const key = `padaria:estado:${chatId}`;
   await redisClient.del(key);
+}
+
+async function setJanelaAtendimento(chatId) {
+  const key = `padaria:janela:${chatId}`;
+  // Janela de atendimento expira em 2 horas
+  await redisClient.setEx(key, 7200, '1');
+}
+
+async function getJanelaAtendimento(chatId) {
+  const key = `padaria:janela:${chatId}`;
+  return await redisClient.get(key);
 }
 
 // ===================== WAHA HELPER =====================
@@ -142,6 +162,13 @@ async function salvarPedido(dados) {
 async function processarMensagem(chatId, mensagem, nome, telefoneReal) {
   const msg = (mensagem || '').trim();
   const msgUpper = msg.toUpperCase();
+
+  // Verifica se está na janela de atendimento humano (2h após pedido confirmado)
+  const janela = await getJanelaAtendimento(chatId);
+  if (janela) {
+    console.log(`[JANELA] ${nome} (${chatId}) em janela de atendimento — bot silencioso`);
+    return; // Bot fica em silêncio
+  }
 
   // Busca estado atual no Redis
   let estado = await getEstado(chatId);
@@ -290,9 +317,10 @@ async function processarMensagem(chatId, mensagem, nome, telefoneReal) {
         });
 
         await delEstado(chatId);
+        await setJanelaAtendimento(chatId);
 
         await enviarMensagem(chatId,
-          `🎉 *Pedido confirmado, ${estado.nome}!*\n\nSeu pedido foi registrado com sucesso! ✅\n🗓 Retirada: ${estado.retirada}\n\nTe esperamos na Padaria da Matriz! 🙏\nQue Deus abençoe! 🍞`
+          `🎉 *Pedido confirmado, ${estado.nome}!*\n\nSeu pedido foi registrado com sucesso! ✅\n🗓 Retirada: ${estado.retirada}\n\nSe tiver alguma dúvida pode responder aqui! 😊\n\nTe esperamos na Padaria da Matriz! 🙏\nQue Deus abençoe! 🍞`
         );
       } catch (err) {
         console.error('Erro ao salvar pedido:', err);
@@ -371,6 +399,78 @@ app.put('/api/pedidos/:id/status', async (req, res) => {
   }
 });
 
+// Arquivar pedidos do mês e zerar tabela principal
+app.post('/api/pedidos/arquivar', async (req, res) => {
+  try {
+    const agora = new Date();
+    const mes = agora.toLocaleString('pt-BR', { month: 'long' });
+    const ano = agora.getFullYear();
+
+    // Copia pedidos para historico
+    const result = await db.query(`
+      INSERT INTO historico (mes, ano, nome, telefone, chat_id, pedido, total, status, retirada, criado_em)
+      SELECT $1, $2, nome, telefone, chat_id, pedido, total, status, retirada, criado_em
+      FROM pedidos
+    `, [mes, ano]);
+
+    const totalArquivados = result.rowCount;
+
+    // Calcula total arrecadado no mês
+    const totais = await db.query('SELECT total FROM pedidos WHERE status != $1', ['Cancelado']);
+    let totalMes = 0;
+    totais.rows.forEach(row => {
+      const val = parseFloat((row.total || '0').replace(/[^\d,]/g,'').replace(',','.')) || 0;
+      totalMes += val;
+    });
+
+    // Zera tabela principal
+    await db.query('DELETE FROM pedidos');
+
+    console.log(`[ARQUIVO] ${totalArquivados} pedidos arquivados - ${mes}/${ano} - Total: R$ ${totalMes.toFixed(2)}`);
+
+    res.json({
+      ok: true,
+      arquivados: totalArquivados,
+      mes,
+      ano,
+      totalMes: `R$ ${totalMes.toFixed(2).replace('.',',')}`
+    });
+  } catch (err) {
+    console.error('Erro ao arquivar:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Histórico de meses anteriores
+app.get('/api/historico', async (req, res) => {
+  try {
+    const result = await db.query(`
+      SELECT mes, ano, COUNT(*) as total_pedidos,
+      SUM(CASE WHEN status != 'Cancelado' THEN 1 ELSE 0 END) as pedidos_confirmados
+      FROM historico
+      GROUP BY mes, ano
+      ORDER BY ano DESC, arquivado_em DESC
+    `);
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Pedidos de um mês específico do histórico
+app.get('/api/historico/:mes/:ano', async (req, res) => {
+  try {
+    const { mes, ano } = req.params;
+    const result = await db.query(
+      'SELECT * FROM historico WHERE mes = $1 AND ano = $2 ORDER BY criado_em DESC',
+      [mes, ano]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ===================== CRIAR TABELAS =====================
 async function iniciarDB() {
   await db.query(`
@@ -386,10 +486,28 @@ async function iniciarDB() {
       criado_em TIMESTAMP DEFAULT NOW()
     )
   `);
-  console.log('Tabela pedidos verificada/criada!');
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS historico (
+      id SERIAL PRIMARY KEY,
+      mes VARCHAR(20),
+      ano INTEGER,
+      nome VARCHAR(255),
+      telefone VARCHAR(50),
+      chat_id VARCHAR(100),
+      pedido TEXT,
+      total VARCHAR(50),
+      status VARCHAR(50),
+      retirada VARCHAR(100),
+      criado_em TIMESTAMP,
+      arquivado_em TIMESTAMP DEFAULT NOW()
+    )
+  `);
+
+  console.log('Tabelas verificadas/criadas!');
 }
 
-// ===================== INICIAR SERVIDOR =====================
+// ===================== API DE PEDIDOS (para o painel) =====================
 async function iniciar() {
   await redisClient.connect();
   await iniciarDB();
